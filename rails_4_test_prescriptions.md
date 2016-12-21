@@ -837,10 +837,351 @@ end
 
 Пройдемся по процессу интеграционного теста.
 
+Первая ошибка будет на первой же строчке: *projects(:bluebook)* - это вызов метода испытательного стенда (fixture), который мы еще не определили. Нужно добавить файл испытательного стенда в директорую спека:
 
+```yml
+# spec/fixtures/projects.yml
+
+one:
+  name: MyString
+  due_date: 2013-11-10
+
+two:
+  name: MyString
+  due_date: 2013-11-10
+
+bluebook:
+  name: Project Blue Book
+  due_date: <%= 6.months.from_now %>
+```
+
+Пока мы там, так же добавим проекту пару заданий для возможности сортировки. Так же нужно добавить *belongs_to :project* в файл *app/models/task.rb*.
+
+```yml
+# spec/fixtures/tasks.yml
+
+one:
+  project: bluebook
+  title: Hunt the aliens
+  size: 1
+  completed_at:
+
+two:
+  project: bluebook
+  title: Write a book
+  size: 1
+  completed_at:
+```
+
+Мне нравится использовать испытательные стенды для интреграционных тестов, потому что это быстрее, чем создавать объекты заново для каждого теста. 
+
+Следующим провалом будет отсутствие метода show в ProjectsController. Этот метод достаточно прост и наверное не нуждается в дополнительном тестировании:
+
+```ruby
+# app/controllers/projects_controller.rb
+
+def show
+  @project = Project.find(params[:id])
+end
+```
+
+Нам так же нужен шаблон. Нужна таблица для задач, а так же форма для создания новой задачи.
+
+```erb
+<!-- app/views/projects/show.html.erb -->
+
+<h2>Project: <%= @project.name %></h2>
+
+<h3>Existing Tasks:</h3>
+
+<table>
+  <thead>
+    <tr>Name</tr>
+    <tr>Size</tr>
+  </thead>
+  <tbody>
+    <% @project.tasks.each do |task| %>
+      <tr>
+        <td class="name"><%= task.title %></td>
+        <td class="size"><%= task.size %></td>
+        <td class="completed"><%= task.completed_at.to_s %></td>
+      </tr>
+    <% end %>
+  </tbody>
+</table>
+
+<h3>New Task</h3>
+
+<%= form_for Task.new(project_id: @project.id) do |f| %>
+  <%= f.hidden_field :project_id %>
+  <%= f.label :title, "Task" %>
+  <%= f.text_field :title %>
+  <%= f.label :size %>
+  <%= f.select :size, [1, 2, 3, 4, 5] %>
+  <%= f.submit "Add Task" %>
+<% end %>
+```
+
+На данном этапе тест будет падать, потому что нет метода *create* в *TasksController*. Это значит, что нам нужно создать новую логику. 
+
+```ruby
+# app/controllers/tasks_controller.rb
+
+def create
+  @task = Task.new(
+      params[:task].permit(:project_id, :title, :size))
+  redirect_to @task.project
+end
+```
+
+Следующая ошибка - *Capybara:ElementNotFound: Unable to find css "#task_3"*.
+
+В исходном тесте Capybara мы определяем каждый ряд по порядку заданий, по этому три ряда будут иметь DOM ID: *task_1*, *task_2* и *task_3*. Но у нас не только нет этих ID в шаблоне, но и механизма упорядочивания самих заданий тоже нет. 
+
+Мы хотим чтоб: а) у каждого задания был номер в упорядоченном списке, б) проект отображал задания упорядоченно и в) новые задания попадали в конец списка.
+
+Для решения первой задачи мы дадим заданиям номер по порядку с помощью миграции Rails: 
+
+```
+$ rails g migration add_order_to_tasks
+```
+
+Добавим новый атрибут *project_order*, чтоб не путать с SQL-оператором *order*:
+
+```ruby
+# db/migrate/***_add_order_to_tasks.rb
+
+class AddOrderToTasks < ActiveRecord::Migration
+  def change
+    add_column :tasks, :project_order, :integer
+  end
+end
+```
+
+```
+$ rake db:migrate
+```
+
+Мы может заставить проекты автоматически возвращать задания в правильном порядке используя ActiveRecord и изменив объявления связей на:
+
+```ruby
+has_many :tasks, -> { order "project_order ASC" }
+```
+
+Тест нам не нужен, т.к. это чать фреймворка.
+
+Для работы теста нам так же нужно добавить номер порядка в испытательные стенды в *spec/fixtures/tasks.yml*. Первому объекту дадим *project_order: 1*, второму - *project_order: 2*.
+
+Часть, где проект показывает новые задания и порядок добавляет некоторую логику. Есть несколько вариантов реализации. Мы можем поместить логику в колбэк модели *Task*, который будет автоматически вызываться на сохрании задания; можем поместить ее в метод модели *Project* и запрашивать проект на номер порядка следующего задания; или можем создать фабрику объектов Task подобную CreatesProject, которую мы создавали ранее.
+
+Для простоты, создадим метод в модели *Project*, который будем вызывать при создании задания. Напишем некоторые модульные тесты:
+
+```ruby
+# spec/models/project_spec.rb
+
+describe "task order" do
+  let(:project) { project = Project.create(name: "Project") }
+
+  it "gives me the order of the first task in an empty project" do
+    expect(project.next_task_order).to eq(1)
+  end
+
+  
+  it "gives me the order of the next task in a project" do
+    project.tasks.create(project_order: 3)
+    expect(project.next_task_order).to eq(4)
+  end
+end
+```
+
+Эти тесты пройдут со следующим кодом:
+
+```ruby
+# app/models/project.rb
+
+def next_task_order
+  return 1 if tasks.empty?
+  (tasks.last.project_order || tasks.size) + 1
+end
+```
+
+Теперь нужно это интегрировать. Прежде всего нужно вызывать новый метод в контроллере:
+
+```ruby
+# app/controllers/tasks_controller.rb
+
+def create
+  @project = Project.find(params[:task][:project_id])
+  @project.tasks.create(title: params[:task][:title],
+      size: params[:task][:size],
+      project_order: @project.next_task_order)
+  redirect_to @project
+end
+```
+
+Теперь в шаблоне *app/views/projects/show.html.erb* мы заменим ряд таблицы следующим:
+
+```erb
+<tr id="task_<%= task.project_order %>">
+```
+
+Это предоставим нам наш селектор *task_3*.
+
+Следующей ошибкой будет *Unable to find link or button with text "Up"*, которая означает что логика обновления отсутствует.
+
+Какая логика нужна? И как мы можем написать для нее тест?
+
+Мы хотим кнопку "Up" для всех заданий, кроме первого, и кнопку "Down" для всех, кроме последнего. То есть мы должны уметь определять, является ли задания первым или последним. Это тестируемо:
+
+```ruby
+# spec/models/task_spec.rb
+
+describe "order" do
+  let!(:project) { Project.create!(name: "Project") }
+  let!(:first) { project.tasks.create!(project_order: 1) }
+  let!(:second) { project.tasks.create!(project_order: 2) }
+  let!(:third) { project.tasks.create!(project_order: 3) }
+
+  it "finds that a task is first or last" do
+    expect(first). to be_first_in_project
+    expect(first).not_to be_last_in_project
+    expect(second).not_to be_first_in_project
+    expect(second).not_to be_last_in_project
+    expect(third).not_to be_first_in_project
+    expect(third). to be_last_in_project
+  end
+end
+```
+
+Тут больше проверок, чем я обычно помещаю в одном тесте, но они очень тесто связаны, по этому я решил, что они будут лучше всего читаться в одной группе.
+
+Тест пройдет при:
+
+```ruby
+# app/models/task.rb
+
+def first_in_project?
+  return false unless project
+  project.tasks.first == self
+end
+
+def last_in_project?
+  return false unless project
+  project.tasks.last == self
+end
+```
+
+Теперь нужно поместить эту логику в шаблон представления, добавив немного кода в цикл в *app/views/projects/show.html.erb*. Есть два варианта: направлять ссылку на метод *update* контроллера *TasksController*, который уже существует и его нужно менять, или же создавать новые действия *up* и *down* в контроллере. 
+
+Выберем второе. Сначала определим маршруты:
+
+```ruby
+# config/routes.rb
+
+Gatherer::Application.routes.draw do
+  resources :tasks do
+    member do
+      patch :up
+      patch :down
+    end
+  end
+
+  resources :projects
+end
+```
+
+Далее дополним шаблона *app/views/projects/show.html.erb*:
+
+```erb
+<td>
+  <% unless task.first_in_project? %>
+    <%= link_to "Up", up_task_path(task.id), method: :patch %>
+  <% end %>
+  <% unless task.last_in_project? %>
+    <%= link_to "Down", down_task_path(task.id), method: :patch %>
+  <% end %>
+</td>
+```
+
+Далее нужна возможность менять порядок задания с одним из его соседов, которая предпологает возможность найти этих соседов. 
+
+```ruby
+# spec/models/task_spec.rb
+describe "order" do
+# ...
+  it "can move up" do
+    expect(second.previous_task).to eq(first)
+    second.move_up
+    expect(first.reload.project_order).to eq(2)
+    expect(second.reload.project_order).to eq(1)
+  end
+
+  it "can move down" do
+    expect(second.next_task).to eq(third)
+    second.move_down
+    expect(third.reload.project_order).to eq(2)
+    expect(second.reload.project_order).to eq(3)
+  end
+end
+```
+
+А вот набор методов для прохождения этих тестов:
+
+```ruby
+# app/models/task.rb
+
+def my_place_in_project
+  project.tasks.index(self)
+end
+
+def previous_task
+  project.tasks[my_place_in_project - 1]
+end
+
+def next_task
+  project.tasks[my_place_in_project + 1]
+end
+
+def swap_order_with(other)
+  other.project_order, self.project_order =
+      self.project_order, other.project_order
+  self.save
+  other.save
+end
+
+def move_up
+  swap_order_with(previous_task)
+end
+
+def move_down
+  swap_order_with(next_task)
+end
+```
+
+Осталось совсем чуть-чуть. Нужно лишь дополнить контроллер:
+
+```ruby
+# app/controllers/tasks_controller.rb
+
+def up
+  @task = Task.find(params[:id])
+  @task.move_up
+  redirect_to @task.project
+end
+
+def down
+  @task = Task.find(params[:id])
+  @task.move_down
+  redirect_to @task.project
+end
+```
+
+И... теперь интеграционный тест проходит успешно, все тесты зеленые. Ура.
 
 <div id='user-content-chapter-10.6'/></div>
 ### Ретроспектива
+
+Давайте вернемся на шаг назад и обсудим что только-что случилось.
 
 <div id='user-content-chapter-10.7'/></div>
 ### Пробуем Cucumber
