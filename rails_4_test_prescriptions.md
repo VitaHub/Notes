@@ -31,7 +31,7 @@
   * [Пробуем Cucumber](#user-content-chapter-10.7)
   * [Настройка Cucumber](#user-content-chapter-10.8)
   * [Написание функций Cucumber](#user-content-chapter-10.9)
-  * [Шаги написания теств с Cucumber](#user-content-chapter-10.10)
+  * [Написание шагов Cucumber](#user-content-chapter-10.10)
   * [Продвинутый Cucumber](#user-content-chapter-10.11)
   * [Стоит ли Cucumber того?](#user-content-chapter-10.12)
   * [Заглядывая вперед](#user-content-chapter-10.13)
@@ -1193,14 +1193,134 @@ end
 <div id='user-content-chapter-10.7'/></div>
 ### Пробуем Cucumber
 
+Cucumber - это инструмент для написания приемочных и интеграционных тестов на простом языке. Я предпочитаю смотреть на Cucumber как на инструмент, который делает две вещи. Во-первых, он позволяет структурировать интеграционные тесты. Во-вторых, он дает возможность описать требуемое поведение системы без использования кода.
+
 <div id='user-content-chapter-10.8'/></div>
 ### Настройка Cucumber
+
+Для установки Cucumber нам потребуется два гема в *Gemfile*:
+
+```ruby
+group :development, :test do
+  gem 'cucumber-rails', require: false  # The false prevents warning
+  gem 'database_cleaner'
+end
+```
+
+И *bundle install*.
+
+Строго говоря, *database_cleaner* не обязателен, но полезен. В момент написания книги мы говорим о Cucumber версии 1.3.15 и *cucumber-rails* версии 1.4.1.
+
+Для установки Cucumber есть генератор: 
+
+```
+$ rails generate cucumber:install
+```
+
+Он создаст файл *config/cucumber.yml* для параметров среды выполнения, сам скрипт командной строки *cucumber*, *rake* task, папку *features* с подпапками *step_definitions* и *support*, а так же файл *features/support/env.rb* (аналог *test_helper.rb*). Так же он изменяет файл *database.yml* добавляя окружение *cucumber*, которое копирует тестовое окружение. У Cucumber есть некоторые дополнительные параметры конфигурации, увидеть которые можно с помощью команды *rails generate cucumber:install --help*. 
 
 <div id='user-content-chapter-10.9'/></div>
 ### Написание функций Cucumber
 
+В Cucumber тесты пишут сериями шагов, используя очень минималистичный язык под названием Gherkin. Единичный тест Cucumber называется сценарием, а группа тестов - функцией (feature). 
+
+Давайте возьмем интеграционный тест Capybara из последней части и конвертируем его в тест Cucumber. Файлы функций Cucumber распологаются в директории features и заканчиваются на .feature.
+
+```feature
+# features/add_task.feature
+
+Feature: Adding a task
+
+  Background:
+    Given a project
+
+  Scenario: I can add and change priority of a new task
+    When I visit the project page
+    And I complete the new task form
+    Then I am back on the project page
+    And I see the new task is last in the list
+    When I click to move the new task up
+    Then I am back on the project page
+    And the new task is in the middle of the list
+```
+
+У этого файла три части. Объфвление функции *Feature* вверху. Файл должен иметь одно объявление, но в самом объявлении можно писать что угодно, оно исключительно для людей. Язык Gherkin чуствителен к пробелам, по этому все, что идет после объявления функции, должно быть с отступом.
+
+Следующая часть - *Background*, которая необязательна. В Cucumber *Background* похож на *setup* в Minitest или *before* в RSpec, указывая код, который запускается для инициализации каждого теста. В нашем случае, с одним сценарием не обязательно иметь *Background*, но в случае с несколькими несколькими сценариями, *Background* может быть общий для всех. 
+
+После *Background* идет *Scenario*, где расположен сем тест. Как *Background*, так и *Scenario* состоят из шагов. В Cucumber шаг обычно состоит из одного из слов *Given*, *When* или *Then*. Так же можно начинать строку со слов *And* или *But* для читабельности. 
+
+Различие между *Given*, *When* и *Then* для людей. Cucumber не требует соблюдения определенного порядка в шагах. 
+
+Сценарий выполняется командой *cucumber* или с указанием файла *cucumber features/add_task.feature*. На выходе имеем две части. В первой листинг по выполнению, который начинается примерно так:
+
+```
+Background: # features/add_task.feature:3
+    Given a project # features/add_task.feature:4
+      Undefined step: "a project" (Cucumber::Undefined)
+      features/add_task.feature:4:in `Given a project'
+
+Scenario: I can add and change priority of a new task
+                        # features/add_task.feature:6
+    When I visit the project page
+                        # features/add_task.feature:7
+      Undefined step: "I visit the project page" (Cucumber::Undefined)
+      features/add_task.feature:7:in `When I visit the project page'
+```
+
+Тут не видно, но весь текст, кроме строк с *Background* и *Scenario* будет желтым.
+
+Когда запускается сценарий, Cucumber пытается запустить каждый шаг по его определению. В данном выводе Cucumber сообщает номера строк, которые пытается запустить и что эти шаги не определены. Мы и вправду их не определили. 
+
+Далее нам сообщают, что у нас один сценарий с восемью шагами, из которых один сценарий и 8 шагов не определены. Cucumber добавляет дополнительный вывод в терминал, который начинается примерно так:
+
+```
+You can implement step definitions for undefined steps with these snippets:
+
+Given(/^a project$/) do
+  pending # express the regexp above with the code you wish you had
+end
+
+When(/^I visit the project page$/) do
+  pending # express the regexp above with the code you wish you had
+end
+```
+
+Этот вывод продолжается для всех неопределенных шагов. Cucumber нам очень помогает тут, давая образцы для каждого неопределенного шага, которые можно вставить в редактор и заполнить. 
+
+Так и сделаем. Возьмем все эти блоки и скопируем в файл *features/step_definitions/add_task_steps.rb*. Сделав это перезапустим Cucumber:
+
+```
+Background: # features/add_task.feature:3
+    Given a project # features/step_definitions/add_task_steps.rb:1
+      TODO (Cucumber::Pending)
+      ./features/step_definitions/add_task_steps.rb:2:in `/^a project$/'
+      features/add_task.feature:4:in `Given a project'
+
+  Scenario: I can add and change priority of a new task
+            # features/add_task.feature:6
+    When I visit the project page
+            # features/step_definitions/add_task_steps.rb:5
+    And I complete the new task form
+            # features/step_definitions/add_task_steps.rb:9
+    Then I am back on the project page
+            # features/step_definitions/add_task_steps.rb:13
+    And I see the new task is last in the list
+            # features/step_definitions/add_task_steps.rb:17
+    When I click to move the new task up
+            # features/step_definitions/add_task_steps.rb:21
+    Then I am back on the project page
+            # features/step_definitions/add_task_steps.rb:13
+    And the new task is in the middle of the list
+            # features/step_definitions/add_task_steps.rb:25
+```
+
+Верхние строки желтые, а строки под *Scenario* - голубые. Cucumber останавливает тест на первом же ожидающем шаге (pending) и обозначает каждый последующий шаг как пропущенный.
+
+Пора сказать Cucumber, что нужно делать на каждой шаге.
+
 <div id='user-content-chapter-10.10'/></div>
-### Шаги написания тестов с Cucumber
+### Написание шагов Cucumber
 
 <div id='user-content-chapter-10.11'/></div>
 ### Продвинутый Cucumber
