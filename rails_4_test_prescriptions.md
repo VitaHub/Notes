@@ -32,7 +32,7 @@
   * [Настройка Cucumber](#user-content-chapter-10.8)
   * [Написание функций Cucumber](#user-content-chapter-10.9)
   * [Написание шагов Cucumber](#user-content-chapter-10.10)
-  * [Продвинутый Cucumber](#user-content-chapter-10.11)
+  * [Более продвинутый Cucumber](#user-content-chapter-10.11)
   * [Стоит ли Cucumber того?](#user-content-chapter-10.12)
   * [Заглядывая вперед](#user-content-chapter-10.13)
 
@@ -1403,10 +1403,83 @@ end
 В изначальном тесты мы определяли проекты используя испытательные стенды. В тесте Cucumber мы явно создаем *@project* и его задание в шаге *Given a project*. По умолчанию Cucumber не использует испытательные стенды. Хотя Cucumber можно научить понимать испытательные стенды, это отдельный разговор, прямо сейчас нам это не нужно. 
 
 <div id='user-content-chapter-10.11'/></div>
-### Продвинутый Cucumber
+### Более продвинутый Cucumber
+
+Cucumber обладает широкими дополнительными возможностями при сравнении шагов с их определениями. В общем и целом, сообщество Cucumber пришло к выводу, что большинство из этих возможносте не стоит часто использовать или не стоит использовать вовсе.
+
+Ранее я ссылался на идею о том, что определения шагов должны быть регулярными выражениями, а не строками. Это позволит применять одно определения шага для нескольких строк. 
+
+В нашем первоначальном шаге мы прописывали имя проекта внутри определения шага. Но если мы захотим прописывать имя проекта в функции Cucumber, можно писать определение шага следующим образом:
+
+```ruby
+Given /^a project named "(.*)"$/ do |project_name|
+  @project = Project.create!(name: project_name)
+end
+```
+
+Под это определение будут подходить шаги, подобны этим:
+
+```feature
+Given a project named "Rails 4 Test Prescriptions"
+Given a project named "Evil Master Plan"
+```
+
+В каждом случае определение шага будет создавать проект с данным именем. 
+
+В плане ввода данных в файле функции Cucumber можно пойти даже дальше. Cucumber позволяет прилагать таблицу данных к шагу. 
+
+Для создания таблицы нужно использовать что-то вроде синтаксиса таблицы Markdown. В файле функции это должно выглядеть примерно так:
+
+```feature
+Given the following users:
+    | login| email            | password| password_confirmation|
+    | alpha| alpha@example.com| alpha1  | alpha1               |
+    | beta | beta@example.com | beta12  | beta12               |
+```
+
+Строка шага с таблицей должна заканчиваться двоеточием. Для разграничения записей используется вертикальная черта.
+
+Когда Cucumber сверяет определение шага с шагом с таблицей, таблица становится аргументом для блока определения шага - если есть другие совпадения по регулярным выражениям, то таблица становится последним аргументом. Аргумент является специальным типом данных Cucumber и есть несколько вариантов взаимодействия с ним. Чаще всего этот аргумент представляют в виде хеша:
+
+```ruby
+Given /^the following users$/ do |user_data|
+  User.create!(user_data.hashes)
+end
+```
+
+Что-то подобное можно делать с большим строковым литералом:
+
+```feature
+Given I have typed the following
+  """
+  some big amount of text
+  """
+```
+
+Текст внутри тройных кавычек будет передан блоку определения шага в качестве последнего аргумента. 
+
+Таблицы и строковые литералы (сценарии) можно совмещать:
+
+```feature
+Scenario Outline: Users get created
+  Given I go to the login page
+  When I type <login> in the login field
+  And I type <password> in the password field
+  Then I am logged in
+Examples:
+  | login| email            | password| password_confirmation|
+  | alpha| alpha@example.com| alpha1  | alpha1               |
+  | beta | beta@example.com | beta12  | beta12               |
+```
+
+Сценарий запускается для каждой строки таблицы и данные из таблицы подставляются в сами шаги.
+
+Простые определения шагов делают Cucumber более управляемым. Помещая много кода (данные, имена атрибутов, CSS-селекторы) в файлы функции Cucumber, мы усложняем их. Данные в файлах функций не дают им показать намерения. Какая цель шага *Given a user than has been on the site for 2 months?*. Сложно сказать. Шаг *Given a user than has been on the site long enough to be trusted* более красноречив и объясняет зачем он вообще существует. 
 
 <div id='user-content-chapter-10.12'/></div>
 ### Стоит ли Cucumber того?
+
+
 
 <div id='user-content-chapter-10.13'/></div>
 ### Заглядывая вперед
