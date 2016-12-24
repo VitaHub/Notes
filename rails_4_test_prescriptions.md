@@ -1244,11 +1244,11 @@ Feature: Adding a task
     And the new task is in the middle of the list
 ```
 
-У этого файла три части. Объфвление функции *Feature* вверху. Файл должен иметь одно объявление, но в самом объявлении можно писать что угодно, оно исключительно для людей. Язык Gherkin чуствителен к пробелам, по этому все, что идет после объявления функции, должно быть с отступом.
+У этого файла три части. Объявление функции *Feature* вверху. Файл должен иметь одно объявление, но в самом объявлении можно писать что угодно, оно исключительно для людей. Язык Gherkin чуствителен к пробелам, по этому все, что идет после объявления функции, должно быть с отступом.
 
-Следующая часть - *Background*, которая необязательна. В Cucumber *Background* похож на *setup* в Minitest или *before* в RSpec, указывая код, который запускается для инициализации каждого теста. В нашем случае, с одним сценарием не обязательно иметь *Background*, но в случае с несколькими несколькими сценариями, *Background* может быть общий для всех. 
+Следующая часть - *Background*, которая необязательна. В Cucumber *Background* похож на *setup* в Minitest или *before* в RSpec, указывая код, который запускается для инициализации каждого теста. В нашем случае, с одним сценарием не обязательно иметь *Background*, но в случае с несколькими сценариями, *Background* может быть общий для всех. 
 
-После *Background* идет *Scenario*, где расположен сем тест. Как *Background*, так и *Scenario* состоят из шагов. В Cucumber шаг обычно состоит из одного из слов *Given*, *When* или *Then*. Так же можно начинать строку со слов *And* или *But* для читабельности. 
+После *Background* идет *Scenario*, где расположен сам тест. Как *Background*, так и *Scenario* состоят из шагов. В Cucumber шаг обычно состоит из одного из слов *Given*, *When* или *Then*. Так же можно начинать строку со слов *And* или *But* для читабельности. 
 
 Различие между *Given*, *When* и *Then* для людей. Cucumber не требует соблюдения определенного порядка в шагах. 
 
@@ -1288,7 +1288,7 @@ end
 
 Этот вывод продолжается для всех неопределенных шагов. Cucumber нам очень помогает тут, давая образцы для каждого неопределенного шага, которые можно вставить в редактор и заполнить. 
 
-Так и сделаем. Возьмем все эти блоки и скопируем в файл *features/step_definitions/add_task_steps.rb*. Сделав это перезапустим Cucumber:
+Так и сделаем. Возьмем все эти блоки и скопируем в файл *features/step_definitions/add_task_steps.rb*. Сделав это, перезапустим Cucumber:
 
 ```
 Background: # features/add_task.feature:3
@@ -1321,6 +1321,86 @@ Background: # features/add_task.feature:3
 
 <div id='user-content-chapter-10.10'/></div>
 ### Написание шагов Cucumber
+
+Когда Cucumber получает шаг вроде *Given a project*, он ищет соответствующее определение по всем файлам в директории *step_definitions*. Что это значит? Посмотрим еще раз на шаблон для данного шага:
+
+```ruby
+Given(/^a project$/) do
+  pending
+end
+```
+
+Первая строка определения - это одно из тех слов *Given/When/Then* (неважно какое именно) с последующим регулярным выражением. Cucumber сверяет шаг с определением. То есть, когда он видит шаг *Given a project*, то запускает код внутри блока с соответствующим определением шага. Если Cucumber находит более одного совпадающего шага, то выводит ошибку.
+
+Внутри определения шага можно писать любой код Ruby. Переменные экземпляров объявленные в одном определении шага будут доступны в последующих шагах того же теста. Будьте внимательны с переменными экземпляров, не всегда легко сказать, какие переменные существуют из предыдущих шагов, или какое значение им присвоено. Cucumber воспринимает методы Capybara и сличители RSpec (если конечно RSpec установлен). Методы, объявленные в любом определении шага будут доступны в любом определении шага. 
+
+По умолчанию, Cucumber не понимает Minitest. Если хотите использовать утверждения (assertions) Minitest, нужно разместить следующий код в *features/support*:
+
+```ruby
+# features/support/minitest.rb
+
+require 'minitest'
+module MiniTestAssertions
+  def self.extended(base)
+    base.extend(MiniTest::Assertions)
+    base.assertions = 0
+  end
+
+  attr_accessor :assertions
+end
+World(MiniTestAssertions)
+```
+
+*World* в последней строке это глобальный конфигурационный объект Cucumber. Передавая ему имя модуля мы расширяем *World* этим модулем, вызывая метод *extended*, который вставляет утверждения (assertions) Minitest в Cucumber. Этот параграф можно проигнорировать и просто использовать сличители RSpec. 
+
+В принципе наш интеграционный тест уже готов, нам только нужно разделить его на куски.
+
+```ruby
+# features/step_definitions/add_task_steps.rb
+
+Given(/^a project$/) do
+  @project = Project.create(name: "Bluebook")
+  @project.tasks.create(title: "Hunt the Aliens", size: 1, project_order: 1)
+  @project.tasks.create(title: "Write a book", size: 1, project_order: 2)
+end
+#
+
+When(/^I visit the project page$/) do
+  visit project_path(@project)
+end
+
+When(/^I complete the new task form$/) do
+  fill_in "Task", with: "Find UFOs"
+  select "2", from: "Size"
+  click_on "Add Task"
+end
+
+Then(/^I am back on the project page$/) do
+  expect(current_path).to eq(project_path(@project))
+end
+
+Then(/^I see the new task is last in the list$/) do
+  within("#task_3") do
+    expect(page).to have_selector(".name", text: "Find UFOs")
+    expect(page).to have_selector(".size", text: "2")
+    expect(page).to have_no_selector("a", text: "Down")
+  end
+end
+
+When(/^I click to move the new task up$/) do
+  within("#task_3") do
+    click_on("Up")
+  end
+end
+
+Then(/^the new task is in the middle of the list$/) do
+  within("#task_2") do
+    expect(page).to have_selector(".name", text: "Find UFOs")
+  end
+end
+```
+
+В изначальном тесты мы определяли проекты используя испытательные стенды. В тесте Cucumber мы явно создаем *@project* и его задание в шаге *Given a project*. По умолчанию Cucumber не использует испытательные стенды. Хотя Cucumber можно научить понимать испытательные стенды, это отдельный разговор, прямо сейчас нам это не нужно. 
 
 <div id='user-content-chapter-10.11'/></div>
 ### Продвинутый Cucumber
