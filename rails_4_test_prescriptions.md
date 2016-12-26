@@ -1,5 +1,5 @@
 # Основные приципы тестирования в Rails 4
-Конспект по книги Rails 4 Test Prescriptions by Noel Rappin
+Конспект по книге Rails 4 Test Prescriptions by Noel Rappin
 
 ## Содержание
 
